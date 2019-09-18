@@ -1,0 +1,404 @@
+---
+title: "15.458 Financial Data Science and Computing"
+author: "Devin Connolly, 929315784"
+date: "September 12, 2019"
+output:
+  html_notebook:
+    df_print: paged
+    toc: yes
+  pdf_document:
+    toc: yes
+subtitle: 'Project A: Market Data, Volatility, and Indices'
+header-includes:
+  - \usepackage{leading}
+  - \leading{13pt}
+---
+#Question 1
+## Question 1A - Reading in Datasets
+First, read in two datasets: one for SPX and one for INDU. The S&P began trading in 1928, but did not become the S&P500 until March 4, 1957 (3/4/1957), so the data was subset to only include these values.  
+
+
+```{r}
+setwd("/Users/devinconnolly/Documents/MIT Academic/Fall 2019/Data Science and Computing/Assignment 1")
+spx_data <- read.csv("spx.csv")
+dowjones_data <- read.csv("dowjones.csv")
+
+head(spx_data)
+tail(spx_data)
+
+```
+
+Then convert the date column to date type, to allow easier locating and indexing later on.  
+
+```{r}
+
+spx_data$Dates = as.Date(spx_data$Dates, "%d/%m/%Y")
+dowjones_data$Dates = as.Date(dowjones_data$Dates, "%d/%m/%Y")
+
+start <- which(spx_data$Dates == "1957-03-04")
+spx_data <- spx_data[start:length(spx_data$Dates),]
+rownames(spx_data) <- seq(length=nrow(spx_data))
+```
+
+##Question 1B - Data Integrity
+Then begin analysing the integrity of the data. The key things examined here are: unknown/missing values, non-changers, duplicates, negative values for prices, high/low agreement, high/close agreement.
+
+
+
+```{r}
+spx_na <- sum(is.na(spx_data))
+sapply(spx_data, function(x) sum(is.na(x)))
+```
+
+There are no NA values in either the S&P or Dow Jones datasets.  
+
+
+
+```{r}
+spx_diff <- diff(spx_data$PX_LAST)
+head(which(spx_diff == 0))
+length(which(spx_diff == 0))
+```
+
+There are a number of cases where the last price does not change from day to day. The head of list is shown (indexes), and the total count is shown to be 636 days. One of these cases is displayed below (the 108th day in the dataset). The entire rows are the same for the 30th of August and the 2nd of September, which indicates it may have been a non-trading day. It is interesting to note that the Bloomberg data collected includes non-trading days (post 9/11, Labor day). This could be corrected by removing all rows that have no difference from the previous day.  
+```{r}
+spx_data <- spx_data[-(which(spx_diff == 0)), ]
+length(which(diff(spx_data$PX_LAST)== 0))
+rownames(spx_data) <- seq(length=nrow(spx_data))
+```
+
+Then check for duplicate values.  
+
+
+```{r}
+
+sum(duplicated(spx_data))
+
+```
+
+Then check for negative values, ignoring dates (the coding of the date object in R can lead to negative integer encodings).  
+
+```{R}
+sapply(spx_data[,-1], function(x) sum(x <= 0))
+```
+
+Examine if the Hi/Low differences make sense. There are a signicant number of days where high = low. This is because intraday data not recorded for beginning of data set. 
+
+```{r}
+length(which(spx_data$PX_LOW > spx_data$PX_HIGH))
+length(which(spx_data$PX_LOW == spx_data$PX_HIGH))
+sum(spx_data$PX_HIGH != apply(spx_data[,-1], 1, max))
+
+```
+
+##Question 1C - Probability Estimation
+Here, it may be better to subset the data to only those days which intraday prices are recorded, or else the probabilities will be overstated due to this data insufficiency. It is shown that daily data is available from index 6259 onwards, which is April 21st, 1982. The necessary subset is taken. 
+
+The probabilities are then estimated using the relevant frequencies, or the occurences in the sample. For example, for high equals close: 
+
+1) Count the number of days for which the recorded high is equal to the recorded close.
+2) Count the total number of days in the dataset.
+3) The P(High = Close) is equal to: (Number of Occurences)/Total Number In Sample
+
+This method assumes that the subsample is large enough to representative of the entire population (in this case, it is in fact the entire population of intraday data for the S&P500). 
+
+```{r}
+length(which(spx_data$PX_OPEN == spx_data$PX_LAST))
+index <- which(spx_data$PX_OPEN == spx_data$PX_LAST)
+
+spx_data[6530:6540,]
+
+spx_data_sub = spx_data[6259:nrow(spx_data),]
+nrow(spx_data_sub)
+
+length_HO <- length(which(spx_data_sub$PX_HIGH == spx_data_sub$PX_OPEN))
+prob_HO <- length_HO/nrow(spx_data_sub)
+
+length_HC <- length(which(spx_data_sub$PX_HIGH == spx_data_sub$PX_LAST))
+prob_HC <- length_HC/nrow(spx_data_sub)
+
+length_LO <- length(which(spx_data_sub$PX_LOW == spx_data_sub$PX_OPEN))
+prob_LO <- length_LO/nrow(spx_data_sub)
+
+length_LC <- length(which(spx_data_sub$PX_LOW == spx_data_sub$PX_LAST))
+prob_LC <- length_LC/nrow(spx_data_sub)
+
+results <- c(prob_HO, prob_HC, prob_LO, prob_LC)
+names(results) <- c("Hi = Open", "Hi = Close", "Lo = Open", "Lo = Close")
+results
+```
+
+### Testing the Random Walk Hypothesis:
+
+Under the random walk, we would expect both P(High = Open) = P(Low = Open) and P(High = Close) = P(Low = Close). Here, we can see that 11.54% does not equal 14.54% and 6.44% does not equal 1.93%. With a sample size of 9417, the critical value becomes:
+
+$$\frac{1.96}{\sqrt{9417}} = 2.02 \%$$
+
+This shows we can reject the random walk hypothesis as the difference (6.44-1.93) is far greater than 2. 
+
+##Question 1D - Intraday Ranges
+First find the required date ranges for this question.
+```{r}
+start = which(spx_data$Dates == "1980-01-01")
+end = which(spx_data$Dates == "2011-08-30")
+spx_data_intra <- spx_data[start:end,]
+```
+Then calculate the intraday range as per the given formula. Once it is calculated, order the dataset and subset the top 20 values, and arrange them by date. Then those that occured in 2008 or later (the last three years) are counted: 15.
+```{r}
+spx_data_intra$intraday <- (spx_data_intra$PX_HIGH - spx_data_intra$PX_LOW) / spx_data_intra$PX_LOW
+
+ordered_spx_intra <- spx_data_intra[order(spx_data_intra$intraday, decreasing = T),]
+top_20_intra <- ordered_spx_intra[1:20,]
+top_20_dated <- top_20_intra[order(top_20_intra$Dates),]
+top_20_dated
+
+count_2008_onwards <- length(which(top_20_dated$Dates > "2008-09-01"))
+count_2008_onwards
+```
+
+##Question 1E - Overnight Returns
+The overnight rate is calculated as per the formula given. The top and bottom 20 chronologically listed overnight returns are shown. The first three year period (1980-1983) has the most observations from both lists: 20 (top 20), 19 (bottom 20). These periods are so dominant because the lack of intraday pricing is being coded into the overnight returns. 
+
+```{r}
+spx_data$overnight <- c(0, (spx_data$PX_OPEN[2:nrow(spx_data)] / spx_data$PX_LAST[1:nrow(spx_data)-1]) - 1)
+
+start = which(spx_data$Dates == "1980-01-01")
+end = which(spx_data$Dates == "2011-08-30")
+
+spx_data_overnight <- spx_data[start:end,]
+
+ordered_overnight <- spx_data_overnight[order(spx_data_overnight$overnight, decreasing = T),]
+
+top_20_ordered_overnight <- ordered_overnight[1:20,]
+bottom_20_ordered_overnight <- ordered_overnight[(nrow(ordered_overnight)-19):nrow(ordered_overnight),]
+
+top_20_overnight_dated <- top_20_ordered_overnight[order(top_20_ordered_overnight$Dates),]
+bottom_20_overnight_dated <- bottom_20_ordered_overnight[order(bottom_20_ordered_overnight$Dates),]
+
+top_20_overnight_dated
+bottom_20_overnight_dated
+
+length(which(top_20_overnight_dated$Dates < "1983-01-01"))
+length(which(bottom_20_overnight_dated$Dates < "1983-01-01"))
+```
+
+##Question 1F - Market Volatility
+For this question, the log returns for the S&P are needed. They are calculated and added to the original dataframe. The 60 day rolling standard deviation is calcualted using the RcppRoll package. The jumps are then added and appended to the dataframe. The largest jump occured on Black Monday (October 19th, 1987). The top 20 jumps are listed below. 
+
+```{r}
+
+spx_RET <- diff(log(spx_data$PX_LAST))
+spx_data$RET <- c(0, spx_RET)
+
+library(RcppRoll)
+rolled_sd <- roll_sd(spx_data$RET, 63)
+zeros <- c(rep(0, 62))
+spx_data$roll_sd <- c(zeros, rolled_sd)
+
+jumps <- spx_data$RET[63:nrow(spx_data)] / spx_data$roll_sd[63:nrow(spx_data)]
+
+spx_data$jumps <- c(zeros, jumps)
+
+spx_jump_ordered <- spx_data[order(abs(spx_data$jumps), decreasing = T),]
+top_20_jumps <- spx_jump_ordered[1:20,]
+top_20_jumps_dated <- top_20_jumps[order(top_20_jumps$Dates),]
+top_20_jumps_dated[, c(1,5,8,9)]
+
+length(which((top_20_jumps_dated$Dates < "2011-08-30") & (top_20_jumps_dated$Dates > "2008-08-30")))
+```
+
+#Question 2
+##Question 2A - Data Discrepancies
+First, read in the same dataset from Yahoo to compare with the Bloomberg data. Isolate the specific day in question (October 6th, 1982). The Bloomberg and Yahoo data are shown below. 
+
+```{r}
+library(quantmod)
+
+symbol = "^GSPC"
+startday = as.Date("1982-10-1") # Year-Month-Day
+endday = as.Date("1982-10-31") # Year-Month-Day
+loadSymbols(Symbols = symbol, 
+            src = "yahoo",
+            from = startday,
+            to = endday)
+
+#GSPC for October 6
+index <- which(index(GSPC) == '1982-10-06')
+yh_oct6 <- GSPC[(index-1):(index+1),]
+
+#Isolate this date in Bloomberg data
+bb_index = which(spx_data$Dates == "1982-10-6")
+bb_oct6 <- spx_data[(bb_index-1):(bb_index+1),1:5 ]
+
+bb_oct6
+yh_oct6
+```
+Both the high and last price for October 6th 1982 were 126.97 according to Bloomberg and 125.97 according to Yahoo. A higher high price indicates that greater trading profits could have been made using Bloomberg prices as opposed to Yahoo prices. Holding the S&P Index from the open to close that day, returns would be:
+
+Bloomberg: Nominal Gain = 4.97, Return = 4.074%
+Yahoo: Nominal Gain = 3.97, Return = 3.254%
+
+The return for Bloomberg is approximately 25% higher than that for Yahoo. 
+
+It is interesting to note that both vendors have the same opening price for October 7th. 
+
+Wall Street Journal (https://quotes.wsj.com/index/SPX/historical-prices) gives the following information:
+
+```{r}
+wsj_6th <- c(125.97, 126.33, 121.82, 125.97)
+names(wsj_6th) <- c("OPEN", "HIGH", "LOW", "CLOSE")
+wsj_6th
+```
+
+Here, the nominal return using WSJ is 0 (open and close are equal). The high is between those of Bloomberg and Yahoo, while the index closes at the same price as on Yahoo. WSJ reports a lower low value than both of the other providers as well. 
+
+I would argue that Yahoo has the correct value for the Index. This is because Yahoo record a high and close of 125.97, while the Index opens at 125.99 for both sources, which is more consistent. Furthermore, open and close prices are consistent with a stock market rally, whily the WSJ data seems to indicate the open  has been plugged from the close.  
+
+#Question 3
+##Question 3A - Dow Jones Analysis
+The composition of the Dow Jones Industrial Average Index was obtained from Bloomberg for March 6th, 9th, 18th, and 19th of March, 2015. The data for prices for Apple (AAPL), Amazon (AMZN), AT&T (T), and Berkshire Hathaway (BRK-A) were all obtained from Yahoo Finance using the quantmod package. 
+
+```{r}
+library(readxl)
+
+march6 <- read_excel("Mar 06 2015.xlsx")
+march9 <- read_excel("Mar 09 2015.xlsx")
+march18 <- read_excel("Mar 18 2015.xlsx")
+march19 <- read_excel("Mar 19 2015.xlsx")
+
+library(quantmod)
+symbol = "AAPL"
+startday = as.Date("2015-03-01")
+endday = as.Date("2015-03-31")
+loadSymbols(Symbols = symbol,
+            src = "yahoo",
+            from = startday,
+            to = endday)
+
+symbol = "T"
+startday = as.Date("2015-03-01")
+endday = as.Date("2015-03-31")
+loadSymbols(Symbols = symbol,
+            src = "yahoo",
+            from = startday,
+            to = endday)
+
+#Subsetting INDU data to just March 2015
+start = which(dowjones_data$Dates == "2015-03-02")
+end = which(dowjones_data$Dates == "2015-03-31")
+dow_sub <- dowjones_data[start:end,]
+```
+
+The market value of the INDU was calculated for the 6th and 9th of March. This is the sum of the individual prices (each position is just 1 unit). 
+```{r}
+#Extracting INDU prices for 6th and 9th of March
+mv6_march <- sum(march6$Price)
+mv9_march <- sum(march9$Price)
+```
+
+To calculate the value the divisor would have been if the changes had occured on the 6th of March, we need to extract the prices of both AAPL (the company entering the index) and T (the company leaving the index). The new market value is calculated by taking the old market value and adding the price of AAPL and subtracting the price for T. 
+```{r}
+p_AAPL_6 <- as.numeric(AAPL[which(index(AAPL) == "2015-03-06"),4])
+p_T_6 <- as.numeric(T[which(index(T) == "2015-03-06"),4])
+
+new_mv  <- mv6_march + p_AAPL_6 - p_T_6
+```
+
+The divisor is found using the formula:
+
+ $$D = \frac{Market Value}{Index Price}$$
+ 
+```{r}
+dow_6th <- dow_sub[(dow_sub$Dates) == '2015-03-06',]
+dow_6th_price <- dow_6th$PX_LAST
+
+#Current divisor, and new divisor given the change
+divisor <- mv6_march / dow_6th_price
+print(paste("The old divisor: ", round(divisor,4)))
+divisor_new <- new_mv /dow_6th_price
+print(paste("The new divisor: ", round(divisor_new,4)))
+
+#Testing the calculation with other formula
+round(divisor * (new_mv/mv6_march), 4)
+```
+##Question 3B - Weight of T (Departing Company)
+This is calculated using the price of T divided by the market value of Index at the 6th of March.
+```{r}
+T_weight <- p_T_6 / mv6_march
+print(paste("Weight of T: ",round(T_weight*100,3), "%"))
+```
+
+
+##Question 3C - Weights of Remaining Companies
+The weight of the remaining companies is calculated by calculating the weight of the both T and AAPL and subtracting that from the sum of the weights (100%). Clearly, the remaining 29 companies had a lower weight after the change. This is due to the high weight that AAPL takes upon joining the index (approximately 4.5%).
+```{r}
+before_29 <- sum(march6$Weight) - T_weight*100
+print(paste("Weight of 29 Before Change: ", round(before_29,2), "%"))
+
+AAPL_weight <- p_AAPL_6 / mv6_march
+after_29 <- sum(march9$Weight) - AAPL_weight*100
+print(paste("Weight of 29 After Change: ", round(after_29,2), "%"))
+```
+
+##Question 3D - AMZN, BERK instead of AAPL
+Here, the same process as above is repeated using the prices for Amazon and Berkshire Hathaway. Getting the data:
+```{r}
+symbol = "AMZN"
+startday = as.Date("2015-03-01")
+endday = as.Date("2015-03-31")
+loadSymbols(Symbols = symbol,
+            src = "yahoo",
+            from = startday,
+            to = endday)
+
+symbol = "BRK-A"
+startday = as.Date("2015-03-01")
+endday = as.Date("2015-03-31")
+loadSymbols(Symbols = symbol,
+            src = "yahoo",
+            from = startday,
+            to = endday)
+
+p_AMZN_6 <- as.numeric(AMZN[which(index(AMZN) == "2015-03-06"),4])
+p_BRK_6 <- as.numeric(`BRK-A`[which(index(`BRK-A`) == "2015-03-06"),4])
+```
+
+Calculate the new markmet value of the Index adding each of the stocks, and calculate the divisors. The divisor changes drastically when Berkshire Hathaway is added due to the large stock price of Berkshire. 
+
+```{r}
+new_mv_AMZN  <- mv6_march + p_AMZN_6 - p_T_6
+new_mv_BERK <- mv6_march + p_BRK_6 - p_T_6
+divisor_new_AMZN <- new_mv_AMZN /dow_6th_price
+print(paste("The Divisor with Amazon: ", round(divisor_new_AMZN,4)))
+divisor_new_BERK <- new_mv_BERK /dow_6th_price
+print(paste("The Divisor with Berkshire Hathaway: ", round(divisor_new_BERK,4)))
+
+print(paste("Berkshire Hathaway Stock Price (6th March): $", p_BRK_6))
+```
+
+##Question 3E - Stock Splits
+Stock splits played an important role in the timing of this decision. It is easily noted that once Apple was added, it immediately gained a much larger weight than the departing AT&T. Apple's stock price was even higher prior to its 7-1 stock split in June 2014 (https://investor.apple.com/faq/default.aspx). 
+
+The reason the change occured here however, is because of a Visa 4-1 stock split that was scheduled to be effective at the same date (19th of March, 2015). Following this stock split, the overall weight of technology-focused stocks would decrease significantly. 
+
+```{r}
+old_weight <- as.numeric(march18[which(march18$Ticker == "V UN Equity"), 3])
+
+new_weight <- as.numeric(march19[which(march19$Ticker == "V UN Equity"), 3])
+
+print(paste("The Visa weight changed from", round(old_weight,2), "to", round(new_weight, 2)))
+```
+
+This can be summarised by:
+
+1) Apple's split brought its price closer to the median value of the Index.
+2) Visa's stock split opened up some space for technology-focused stocks in the Index. 
+
+AT&T may have been removed due to the fact that it was one of the lowest-priced technology companies. 
+
+```{r}
+ordered <- march18[order(march19$Price),]
+head(ordered)
+```
+
+
