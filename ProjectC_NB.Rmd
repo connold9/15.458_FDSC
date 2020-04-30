@@ -1,0 +1,179 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+#Question 1 - Beta
+```{r}
+data <- read.csv("jpm_spx.csv", header = F)
+vix <- read.csv("vix.csv", header = F)
+colnames(data) <- c("DATE", "JPM", "SPX")
+colnames(vix) <- c("DATE", "VIX")
+data$VIX <- vix$VIX
+
+data$DATE <- as.Date(data$DATE, format = "%Y-%m-%d")
+
+
+jpm_spx <- lm(JPM ~ SPX, data)
+plot(x = data$SPX, y = data$JPM, xlab = "SPX Returns", ylab = "JPM Returns", main = "JPM vs SPX Returns w/ Regression Line")
+abline(jpm_spx)
+text(x = 0.07, y = -.2, labels = eqn)
+
+cc <- jpm_spx$coefficients
+eqn <- paste("JPM =", paste(round(cc[1],2), paste(round(cc[-1],2), names(cc[-1]), sep=" * ", collapse=" + "), sep=" + "), "+ e")
+
+install.packages("rollRegres")
+library(rollRegres)
+
+fits <- roll_regres(JPM ~ SPX, data, width = 63)
+plot(fits$coefs[,2], type = "l", x = data$DATE, xlab = "Date", ylab = "Beta")
+
+
+#VIX Betas
+jpm_vix <- lm(JPM ~ VIX, data)
+plot(x = data$VIX, y = data$JPM, xlab = "VIX Returns", ylab = "JPM Returns", main = "JPM vs VIX Returns w/ Regression Line")
+abline(jpm_vix)
+text(x = -0.15, y = -.2, labels = eqn2)
+
+cc2 <- jpm_vix$coefficients
+eqn2 <- paste("JPM =", paste(round(cc2[1],2), paste(round(cc2[-1],2), names(cc2[-1]), sep=" * ", collapse=" + "), sep=" + "), "+ e")
+
+#Strong correlation with market - not a good factor. 
+pairs(data[,-1])
+cor(data$SPX, data$VIX)
+```
+
+
+#Question 2 - Performance Modelling
+Isolating daily returns for the four year period from 2001 to 2004, I found:
+
+Average Daily Return: 0.59%
+Daily Standard Deviation: 1.54%
+
+Annualized Return = 148.40
+Annualized SD = 24.44%
+
+Sharpe = 148.40 / 24.44 = 6.07
+
+```{r}
+ff_data <- read.csv("ff_data.csv", header = F)
+colnames(ff_data) <- c("DATE", "MKTRF", "SMB", "HML", "RF", "UMD")
+
+strat <- read.csv("strat_returns.csv", header = T)
+strat$Date <- ff_data$DATE
+strat$Total = as.numeric(gsub("[\\%,]", "", strat$Total))/100
+
+#Using FF Market - RF for the CAPM:
+#Here, we do not use Risk-Free as it is a self-financing portfolio in Sharpe
+#Use RF to Calculate Excess Market Return
+#Using SPX returns and annualised rf / 252 from Cripsy04
+
+spx_rf <- read.csv("spx_rf.csv", header = F)
+colnames(spx_rf) <- c("DATE", "SPX", "RF")
+strat <- cbind(strat, spx_rf[,-1])
+strat$MRKRF <- strat$SPX - strat$RF
+strat <- cbind(strat, ff_data[,-1])
+
+model_capm <- lm(Total ~ MRKRF, strat)
+summary(model_capm)
+
+model_ff <- lm(Total ~ MRKRF + UMD + HML + SMB, strat)
+summary(model_ff)
+
+ordered <- strat[order(strat$Total),]
+plot(ordered$Total, main = "Ordered Returns", xlab = "", ylab = "Daily Return"); grid()
+
+winners = sum(strat$Total > 0)/nrow(strat)
+losers = sum(strat$Total < 0)/nrow(strat)
+neutral = sum(strat$Total == 0)/nrow(strat)
+
+median_winner <- median(strat$Total[(strat$Total > 0)])
+median_loser <- median(strat$Total[(strat$Total < 0)])
+
+```
+
+There are far more winners than losers (66% vs 34%). Furthermore, the median of the winners is higher than that of the losers (1% vs -0.7%). The strategy thus gains a larger value more often, indicating a solid performance. 
+
+#Question 3 - Performance Attribution
+```{r}
+strat_09 <- read.csv("strat_0509.csv", header = T)
+spx_09 <- read.csv("spx_rf_0509.csv", header = F)
+colnames(spx_09) <- c("DATE", "SPX", "RF")
+strat_09 <- cbind(spx_09, strat_09[,-1])
+
+annual_mean <- mean(strat_09$Grand.Total)*252
+annual_sd <- sd(strat_09$Grand.Total)*sqrt(252)
+sharp_total <- annual_mean/annual_sd
+
+annual_mean_long <- mean(strat_09$Long)*252
+annual_sd_long <- sd(strat_09$Long)*sqrt(252)
+sharp_long <- annual_mean_long/annual_sd_long
+
+annual_mean_short <- mean(strat_09$Short)*252
+annual_sd_short <- sd(strat_09$Short)*sqrt(252)
+sharp_short <- annual_mean_short/annual_sd_short
+
+model_05 <- lm(Grand.Total ~ (SPX-RF), strat_09)
+summary(model_05)
+
+
+
+ordered_09 <- strat_09[order(strat_09$Grand.Total),]
+plot(ordered_09$Grand.Total, main = "Ordered Returns", xlab = "", ylab = "Daily Return"); grid()
+
+winners_09 = sum(strat_09$Grand.Total > 0)/nrow(strat_09)
+losers_09 = sum(strat_09$Grand.Total < 0)/nrow(strat_09)
+neutral_09 = sum(strat_09$Grand.Total == 0)/nrow(strat_09)
+
+median_winner_09 <- median(strat_09$Grand.Total[(strat_09$Grand.Total > 0)])
+median_loser_09 <- median(strat_09$Grand.Total[(strat_09$Grand.Total < 0)])
+```
+
+Total Return in 2006 was 81.42%. Manufacturing contributed 39.56% (SIC).
+
+GICS - NA (34.50%). Next actual GIC was Information Technology with 12.27%. 
+
+## Question 4
+Reading in GICS Pivot Table:
+
+```{r}
+
+
+gics_data <- read.csv("gics_pivot.csv", header = T)
+gics_data <- gics_data[-(nrow(gics_data)), ]
+summary(gics_data[,-1])
+
+```
+
+## Question 5
+```{r}
+dj_vol <- read.csv("dj_vol.csv", header = F)
+dj_vol <- dj_vol[,c(1,3,4,5,6,7,8,9,10,11)]
+colnames(dj_vol) <- c("DATE", "MONTH_VOL", "THREE_VOL", "COUNT", "WEIGHT", "R","VAR1_21", "VAR0_21", "VAR1_63", "VAR0_63")
+
+avg_cor1 <- (dj_vol$MONTH_VOL - dj_vol$VAR0_21) / (dj_vol$VAR1_21 - dj_vol$VAR0_21)
+avg_cor3 <- (dj_vol$THREE_VOL - dj_vol$VAR0_63) / (dj_vol$VAR1_63 - dj_vol$VAR0_63)
+
+max_1 <- max(avg_cor1)
+ind_1 <- which(avg_cor1 == max_1)
+max_3 <- max(avg_cor3)
+ind_3 <- which(avg_cor3 == max_3)
+
+dj_vol$AVG1 <- avg_cor1
+dj_vol$AVG3 <- avg_cor3
+
+dj_vol$DATE <- as.Date(dj_vol$DATE, "%Y-%m-%d")
+
+plot(x = dj_vol$DATE, y = dj_vol$AVG1, type = "l", xlab = "", ylab = "Correlation", main = "1 Month Volatility Plot", ylim = c(0,1))
+par(new = T)
+lines(x = dj_vol$DATE, y = dj_vol$VAR0_21, col = "red")
+lines(x = dj_vol$DATE, y = dj_vol$VAR1_21, col = "green")
+lines(x = dj_vol$DATE, y = dj_vol$MONTH_VOL, col = "blue")
+
+
+plot(x = dj_vol$DATE, y = dj_vol$AVG3, type = "l", xlab = "", ylab = "Correlation", main = "3 Month Volatility Plot", ylim = c(0,1))
+par(new = T)
+lines(x = dj_vol$DATE, y = dj_vol$VAR0_63, col = "red")
+lines(x = dj_vol$DATE, y = dj_vol$VAR1_63, col = "green")
+lines(x = dj_vol$DATE, y = dj_vol$THREE_VOL, col = "blue")
+```
