@@ -1,4 +1,4 @@
-# FinDataScience
+# 15.458 Financial Data Science and Computing Fall 2019
 
 Course projects for 15.458 Financial Data Science and Computing.
 
