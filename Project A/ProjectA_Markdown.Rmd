@@ -1,7 +1,7 @@
 ---
 title: "15.458 Financial Data Science and Computing"
 author: "Devin Connolly, 929315784"
-date: "September 12, 2019"
+date: "September 12, 2019 - Amended Fall 2020"
 output:
   html_notebook:
     df_print: paged
